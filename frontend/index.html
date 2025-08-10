@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔗 Euler Trail Builder</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="container">
+                <h1 class="title">
+                    <i class="fas fa-project-diagram"></i>
+                    Euler Trail Builder
+                </h1>
+                <p class="subtitle">Interactive Graph Theory Visualization</p>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="container">
+                <div class="app-layout">
+                    <!-- Control Panel -->
+                    <div class="control-panel">
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-cogs"></i>
+                                Graph Settings
+                            </h3>
+                            
+                            <div class="form-group">
+                                <label class="label">Graph Type:</label>
+                                <div class="radio-group">
+                                    <label class="radio-label">
+                                        <input type="radio" name="graphType" value="undirected" checked>
+                                        <span class="radio-custom"></span>
+                                        Undirected
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="graphType" value="directed">
+                                        <span class="radio-custom"></span>
+                                        Directed
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-mouse-pointer"></i>
+                                Mode Selection
+                            </h3>
+                            <div class="form-group">
+                                <label class="label">Interaction Mode:</label>
+                                <div class="radio-group">
+                                    <label class="radio-label">
+                                        <input type="radio" name="mode" value="node" checked>
+                                        <span class="radio-custom"></span>
+                                        Add Nodes
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="mode" value="edge">
+                                        <span class="radio-custom"></span>
+                                        Create Edges
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="mode" value="delete">
+                                        <span class="radio-custom"></span>
+                                        Delete Elements
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-tools"></i>
+                                Actions
+                            </h3>
+                            
+                            <button id="findEulerTrail" class="btn btn-success">
+                                <i class="fas fa-route"></i>
+                                Find Euler Trail
+                            </button>
+                            
+                            <button id="clearGraph" class="btn btn-danger">
+                                <i class="fas fa-trash"></i>
+                                Clear Graph
+                            </button>
+                            
+                            <button id="showHelp" class="btn btn-secondary">
+                                <i class="fas fa-question-circle"></i>
+                                Help
+                            </button>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-info-circle"></i>
+                                Status
+                            </h3>
+                            <div id="statusDisplay" class="status-display">
+                                Click "Add Node" to start building your graph
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-chart-bar"></i>
+                                Graph Info
+                            </h3>
+                            <div id="graphInfo" class="graph-info">
+                                <div class="info-item">
+                                    <span class="info-label">Nodes:</span>
+                                    <span id="nodeCount">0</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Edges:</span>
+                                    <span id="edgeCount">0</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Connected:</span>
+                                    <span id="graphConnected" class="text-success">Yes</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Graph Canvas -->
+                    <div class="graph-container">
+                        <div class="graph-header">
+                            <h3 class="graph-title">Graph Visualization</h3>
+                            <div class="graph-controls">
+                                <button id="zoomIn" class="btn-icon" title="Zoom In">
+                                    <i class="fas fa-search-plus"></i>
+                                </button>
+                                <button id="zoomOut" class="btn-icon" title="Zoom Out">
+                                    <i class="fas fa-search-minus"></i>
+                                </button>
+                                <button id="resetView" class="btn-icon" title="Reset View">
+                                    <i class="fas fa-expand-arrows-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="graphCanvas" class="graph-canvas">
+                            <svg id="graphSvg" width="100%" height="100%">
+                                <defs>
+                                    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                                            refX="9" refY="3.5" orient="auto">
+                                        <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                                    </marker>
+                                    <marker id="arrowhead-highlighted" markerWidth="10" markerHeight="7" 
+                                            refX="9" refY="3.5" orient="auto">
+                                        <polygon points="0 0, 10 3.5, 0 7" fill="#007bff" />
+                                    </marker>
+                                </defs>
+                                <g id="graphGroup">
+                                    <!-- Edges will be drawn here -->
+                                    <g id="edgesGroup"></g>
+                                    <!-- Nodes will be drawn here -->
+                                    <g id="nodesGroup"></g>
+                                </g>
+                            </svg>
+                        </div>
+
+                        <div class="graph-instructions">
+                            <div class="instruction-item">
+                                <i class="fas fa-mouse-pointer text-primary"></i>
+                                <span>Drag nodes to reposition</span>
+                            </div>
+                            <div class="instruction-item">
+                                <i class="fas fa-mouse text-success"></i>
+                                <span>Click nodes in edge mode to connect</span>
+                            </div>
+                            <div class="instruction-item">
+                                <i class="fas fa-search text-info"></i>
+                                <span>Use mouse wheel to zoom</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trail Result Modal -->
+                <div id="trailModal" class="modal">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title">
+                                <i class="fas fa-route"></i>
+                                Euler Trail Result
+                            </h3>
+                            <button id="closeModal" class="btn-close">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="trailResult"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
