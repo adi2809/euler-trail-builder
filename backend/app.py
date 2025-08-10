@@ -181,26 +181,50 @@ def _mixed_connectivity_ok(nodes: Set[str], edges: List[dict]) -> bool:
 
 def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Optional[str], str, dict]:
     """Analyze mixed graph for Euler trail possibilities."""
+    print(f"\n🔍 ANALYZING MIXED GRAPH:")
+    print(f"📊 Nodes: {sorted(nodes)}")
+    print(f"🔗 Total edges: {len(edges)}")
+    
     # Separate directed and undirected edges
     directed_edges = [e for e in edges if e.get('directed', False)]
     undirected_edges = [e for e in edges if not e.get('directed', False)]
     
-    # Calculate degrees
+    print(f"➡️  Directed edges: {len(directed_edges)}")
+    print(f"↔️  Undirected edges: {len(undirected_edges)}")
+    
+    for edge in directed_edges:
+        print(f"   {edge['source']} → {edge['target']} (ID: {edge['id']})")
+    for edge in undirected_edges:
+        print(f"   {edge['source']} ↔ {edge['target']} (ID: {edge['id']})")
+    
+    # Calculate degrees more carefully for mixed graphs
     in_degree = defaultdict(int)
     out_degree = defaultdict(int)
-    undirected_degree = defaultdict(int)
     
+    # For directed edges: count in-degree and out-degree separately
     for edge in directed_edges:
         out_degree[edge['source']] += 1
         in_degree[edge['target']] += 1
     
+    # For undirected edges: each contributes equally to both in and out degree
     for edge in undirected_edges:
-        undirected_degree[edge['source']] += 1
-        undirected_degree[edge['target']] += 1
+        in_degree[edge['source']] += 1
+        out_degree[edge['source']] += 1
+        in_degree[edge['target']] += 1
+        out_degree[edge['target']] += 1
+    
+    print(f"\n📈 DEGREE ANALYSIS:")
+    for node in sorted(nodes):
+        if in_degree[node] > 0 or out_degree[node] > 0:
+            balance = out_degree[node] - in_degree[node]
+            print(f"   Node {node}: in={in_degree[node]}, out={out_degree[node]}, balance={balance:+d}")
     
     # Check connectivity
     if not _mixed_connectivity_ok(nodes, edges):
+        print("❌ Graph is not connected")
         return False, None, "Graph is not connected", {}
+    
+    print("✅ Graph is connected")
     
     # Analyze degree conditions for mixed Euler trail
     problematic_nodes = []
@@ -208,26 +232,34 @@ def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Opti
     end_candidates = []
     
     for node in nodes:
-        total_in = in_degree[node] + undirected_degree[node]
-        total_out = out_degree[node] + undirected_degree[node]
-        
-        # For mixed graphs, we need to be more flexible
-        if total_in == total_out:
+        # Skip isolated nodes
+        if in_degree[node] == 0 and out_degree[node] == 0:
+            continue
+            
+        if in_degree[node] == out_degree[node]:
             continue  # Balanced node, good for Euler cycle
-        elif total_out - total_in == 1:
+        elif out_degree[node] - in_degree[node] == 1:
             start_candidates.append(node)
-        elif total_in - total_out == 1:
+        elif in_degree[node] - out_degree[node] == 1:
             end_candidates.append(node)
         else:
             problematic_nodes.append(node)
     
+    print(f"\n🎯 EULER ANALYSIS:")
+    print(f"   Start candidates (out-degree > in-degree by 1): {start_candidates}")
+    print(f"   End candidates (in-degree > out-degree by 1): {end_candidates}")
+    print(f"   Problematic nodes: {problematic_nodes}")
+    
     if problematic_nodes:
-        return False, None, f"Nodes {problematic_nodes} have invalid degree balance", {}
+        error_msg = f"Nodes {problematic_nodes} have invalid degree balance for Euler trail"
+        print(f"❌ {error_msg}")
+        return False, None, error_msg, {}
     
     # Determine if Euler trail exists
     if len(start_candidates) == 0 and len(end_candidates) == 0:
         # Euler cycle exists
-        start_node = next((n for n in nodes if out_degree[n] + undirected_degree[n] > 0), None)
+        start_node = next((n for n in nodes if out_degree[n] > 0), None)
+        print(f"🔄 Euler CYCLE found, starting from: {start_node}")
         return True, start_node, "Euler cycle found", {
             'type': 'cycle',
             'start': start_node,
@@ -236,6 +268,7 @@ def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Opti
         }
     elif len(start_candidates) == 1 and len(end_candidates) == 1:
         # Euler path exists
+        print(f"🛤️  Euler PATH found: {start_candidates[0]} → {end_candidates[0]}")
         return True, start_candidates[0], "Euler path found", {
             'type': 'path',
             'start': start_candidates[0],
@@ -244,78 +277,148 @@ def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Opti
             'undirected_edges': len(undirected_edges)
         }
     else:
-        return False, None, f"Invalid start/end configuration: {len(start_candidates)} starts, {len(end_candidates)} ends", {}
+        error_msg = f"Invalid start/end configuration: {len(start_candidates)} starts, {len(end_candidates)} ends"
+        print(f"❌ {error_msg}")
+        return False, None, error_msg, {}
 
 def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[str]]:
     """Find Euler trail using Hierholzer's algorithm for mixed graphs."""
-    # Build adjacency list
+    # Build adjacency list with proper direction handling
     adj = defaultdict(list)
-    edge_lookup = {}
     
     for edge in edges:
         eid = edge['id']
         u, v = edge['source'], edge['target']
         is_directed = edge.get('directed', False)
         
-        edge_lookup[eid] = edge
-        adj[u].append((eid, v, is_directed))
-        
+        # For directed edges: u -> v only
+        # For undirected edges: u <-> v (both directions)
+        adj[u].append((eid, v))
         if not is_directed:
-            adj[v].append((eid, u, is_directed))
+            adj[v].append((eid, u))
     
-    # Find starting point
+    # Debug adjacency list
+    print(f"\n🔗 ADJACENCY LIST:")
+    for node in sorted(adj.keys()):
+        edges_str = ", ".join([f"{eid}→{target}" for eid, target in adj[node]])
+        print(f"   {node}: [{edges_str}]")
+    
+    # Find starting point using our analysis
     ok, start, reason, info = _analyze_mixed_graph(nodes, edges)
     if not ok or start is None:
+        print(f"❌ Mixed graph analysis failed: {reason}")
         return None
     
-    # Hierholzer's algorithm
-    stack = [start]
-    path = []
-    used_edges = set()
+    print(f"🎯 Starting Hierholzer from node: {start}")
+    print(f"📊 Analysis result: {info}")
     
-    # Copy adjacency lists for iteration
-    adj_copy = {u: list(adj[u]) for u in adj}
-    
-    while stack:
-        curr = stack[-1]
-        found_edge = False
+    # Hierholzer's algorithm with circuit finding
+    def find_circuit(start_node):
+        """Find a circuit starting from start_node."""
+        stack = [start_node]
+        circuit = []
+        used_edges = set()
         
-        # Find an unused edge from current vertex
-        while adj_copy.get(curr):
-            eid, next_vertex, is_directed = adj_copy[curr].pop()
+        # Keep track of remaining edges from each vertex (local copy)
+        remaining_edges = {node: list(adj[node]) for node in adj}
+        
+        while stack:
+            curr = stack[-1]
             
-            if eid in used_edges:
-                continue
-                
-            used_edges.add(eid)
-            stack.append(next_vertex)
-            found_edge = True
+            # Find an unused edge from current vertex
+            found_edge = False
+            for i, (eid, next_vertex) in enumerate(remaining_edges.get(curr, [])):
+                if eid not in used_edges:
+                    # Use this edge
+                    used_edges.add(eid)
+                    stack.append(next_vertex)
+                    # Remove this edge from all adjacency lists
+                    remaining_edges[curr].pop(i)
+                    # Also remove the reverse edge if it's undirected
+                    edge_obj = next(e for e in edges if e['id'] == eid)
+                    if not edge_obj.get('directed', False):
+                        # Remove reverse edge
+                        for j, (rev_eid, rev_target) in enumerate(remaining_edges.get(next_vertex, [])):
+                            if rev_eid == eid and rev_target == curr:
+                                remaining_edges[next_vertex].pop(j)
+                                break
+                    found_edge = True
+                    break
+            
+            if not found_edge:
+                # No more edges from current vertex, add to circuit
+                circuit.append(stack.pop())
+        
+        return circuit, used_edges
+    
+    # Start with a circuit from the starting node
+    circuit, used_edges = find_circuit(start)
+    
+    # Keep adding circuits until all edges are used
+    while len(used_edges) < len(edges):
+        # Find a vertex in the current circuit that has unused edges
+        start_vertex = None
+        for vertex in circuit:
+            remaining_count = sum(1 for eid, _ in adj.get(vertex, []) if eid not in used_edges)
+            if remaining_count > 0:
+                start_vertex = vertex
+                break
+        
+        if start_vertex is None:
+            print(f"❌ No vertex with unused edges found, but {len(edges) - len(used_edges)} edges remain")
             break
         
-        if not found_edge:
-            if len(stack) > 1:
-                path.append(stack.pop())
-            else:
-                stack.pop()
+        # Find a circuit starting from this vertex
+        new_circuit, new_used_edges = find_circuit(start_vertex)
+        used_edges.update(new_used_edges)
+        
+        # Insert the new circuit into the main circuit at the start vertex
+        insert_index = circuit.index(start_vertex)
+        circuit = circuit[:insert_index] + new_circuit[::-1] + circuit[insert_index + 1:]
     
-    path.reverse()
+    # Reverse to get the correct order
+    path = circuit[::-1]
     
-    # Convert path to edge sequence
+    print(f"🛤️  Final constructed path: {' -> '.join(path)}")
+    print(f"🔗 Used {len(used_edges)} of {len(edges)} edges")
+    
+    # Convert vertex path to edge sequence
     if len(path) < 2:
+        print("❌ Path too short")
         return None
     
     edge_sequence = []
     for i in range(len(path) - 1):
         u, v = path[i], path[i + 1]
-        # Find the edge between u and v
+        
+        # Find the correct edge between u and v that hasn't been used in sequence
+        found_edge = None
         for edge in edges:
-            if edge['id'] not in [e for e in edge_sequence]:
-                if ((edge['source'] == u and edge['target'] == v) or 
-                    (not edge.get('directed', False) and edge['source'] == v and edge['target'] == u)):
-                    edge_sequence.append(edge['id'])
-                    break
+            if edge['id'] in edge_sequence:
+                continue  # Already used in sequence
+                
+            # Check if this edge connects u to v correctly
+            if edge['source'] == u and edge['target'] == v:
+                found_edge = edge['id']
+                break
+            elif not edge.get('directed', False) and edge['source'] == v and edge['target'] == u:
+                found_edge = edge['id']
+                break
+        
+        if found_edge:
+            edge_sequence.append(found_edge)
+            print(f"✅ Step {i+1}: {u} -> {v} using edge {found_edge}")
+        else:
+            print(f"❌ No edge found between {u} and {v}")
+            # Debug: show available edges
+            available_edges = [e for e in edges if e['id'] not in edge_sequence]
+            print(f"   Available edges: {[(e['id'], e['source'], e['target'], e.get('directed', False)) for e in available_edges]}")
+            return None
     
-    return edge_sequence if len(edge_sequence) == len(edges) else None
+    success = len(edge_sequence) == len(edges)
+    print(f"🎉 Trail construction {'successful' if success else 'failed'}: {len(edge_sequence)}/{len(edges)} edges")
+    
+    return edge_sequence if success else None
 
 # API Routes
 
