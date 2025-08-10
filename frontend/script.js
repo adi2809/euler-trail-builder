@@ -68,6 +68,11 @@ class EulerTrailBuilder {
             this.showHelpModal();
         });
 
+        // Print trail button
+        document.getElementById('printTrail').addEventListener('click', () => {
+            this.printTrail();
+        });
+
         // Graph canvas events
         const canvas = document.getElementById('graphCanvas');
         canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
@@ -308,7 +313,7 @@ class EulerTrailBuilder {
                 }))
             };
 
-            const response = await fetch('http://localhost:5001/api/euler-trail', {
+            const response = await fetch('http://localhost:5002/api/euler-trail', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -360,19 +365,30 @@ class EulerTrailBuilder {
         const modal = document.getElementById('eulerTrailModal');
         const content = document.getElementById('eulerTrailContent');
         
+        // Store trail data for printing
+        this.currentTrailResult = result;
+        
         let html = `
             <div class="graph-info">
                 <div class="info-item">
                     <span class="info-label">Trail Type:</span>
-                    <span class="text-success">${result.trail_type}</span>
+                    <span class="text-success">${result.analysis?.type || 'path'}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Trail Length:</span>
                     <span>${result.trail.length} edges</span>
                 </div>
+                <div class="info-item">
+                    <span class="info-label">Directed Edges:</span>
+                    <span style="color: #e74c3c;">${result.analysis?.directed_edges || 0}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Undirected Edges:</span>
+                    <span style="color: #2c3e50;">${result.analysis?.undirected_edges || 0}</span>
+                </div>
             </div>
             <h4 style="margin: 20px 0 10px 0;">Trail Sequence:</h4>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace;">
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 16px; line-height: 1.5;">
         `;
 
         if (result.trail.length > 0) {
@@ -383,13 +399,26 @@ class EulerTrailBuilder {
 
         html += '</div>';
         
-        if (result.details) {
+        // Add detailed step-by-step trail
+        if (result.trail.length > 0) {
             html += `
-                <h4 style="margin: 20px 0 10px 0;">Details:</h4>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-size: 0.9rem;">
-                    ${result.details}
-                </div>
+                <h4 style="margin: 20px 0 10px 0;">Step-by-Step Trail:</h4>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; max-height: 200px; overflow-y: auto;">
             `;
+            result.trail.forEach((step, index) => {
+                const edgeType = step.directed ? '→' : '↔';
+                const edgeColor = step.directed ? '#e74c3c' : '#2c3e50';
+                html += `
+                    <div style="margin: 5px 0; font-family: monospace;">
+                        <span style="color: #6c757d;">Step ${step.step}:</span>
+                        <span style="color: ${edgeColor}; font-weight: bold;">
+                            ${step.source} ${edgeType} ${step.target}
+                        </span>
+                        <span style="color: #6c757d; font-size: 12px;">(Edge ID: ${step.edge_id})</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
         }
 
         content.innerHTML = html;
@@ -399,6 +428,114 @@ class EulerTrailBuilder {
     showHelpModal() {
         const modal = document.getElementById('helpModal');
         modal.classList.add('show');
+    }
+
+    printTrail() {
+        if (!this.currentTrailResult) {
+            alert('No trail to print. Please find an Euler trail first.');
+            return;
+        }
+
+        const result = this.currentTrailResult;
+        
+        // Create a printable version
+        let printContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Euler Trail - Printable Version</title>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        margin: 20px; 
+                        line-height: 1.6; 
+                    }
+                    .header { 
+                        text-align: center; 
+                        border-bottom: 2px solid #333; 
+                        padding-bottom: 10px; 
+                        margin-bottom: 20px; 
+                    }
+                    .info { 
+                        background: #f8f9fa; 
+                        padding: 15px; 
+                        border-radius: 5px; 
+                        margin: 10px 0; 
+                    }
+                    .trail-sequence { 
+                        background: #e9ecef; 
+                        padding: 15px; 
+                        border-radius: 5px; 
+                        font-family: monospace; 
+                        font-size: 16px; 
+                        margin: 15px 0; 
+                    }
+                    .step { 
+                        margin: 5px 0; 
+                        padding: 5px; 
+                        border-left: 3px solid #007bff; 
+                        padding-left: 10px; 
+                    }
+                    .directed { color: #e74c3c; }
+                    .undirected { color: #2c3e50; }
+                    @media print {
+                        .no-print { display: none; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>🛤️ Euler Trail Result</h1>
+                    <p>Generated on ${new Date().toLocaleString()}</p>
+                </div>
+                
+                <div class="info">
+                    <h3>Graph Information</h3>
+                    <p><strong>Trail Type:</strong> ${result.analysis?.type || 'path'}</p>
+                    <p><strong>Total Edges:</strong> ${result.trail.length}</p>
+                    <p><strong>Directed Edges:</strong> ${result.analysis?.directed_edges || 0}</p>
+                    <p><strong>Undirected Edges:</strong> ${result.analysis?.undirected_edges || 0}</p>
+                </div>
+                
+                <h3>Trail Sequence</h3>
+                <div class="trail-sequence">`;
+        
+        if (result.trail.length > 0) {
+            const trailNodes = [result.trail[0].source];
+            result.trail.forEach(step => trailNodes.push(step.target));
+            printContent += trailNodes.join(' → ');
+        }
+        
+        printContent += `</div>
+                
+                <h3>Step-by-Step Details</h3>`;
+        
+        result.trail.forEach((step, index) => {
+            const edgeType = step.directed ? '→' : '↔';
+            const edgeClass = step.directed ? 'directed' : 'undirected';
+            printContent += `
+                <div class="step">
+                    <strong>Step ${step.step}:</strong>
+                    <span class="${edgeClass}">${step.source} ${edgeType} ${step.target}</span>
+                    <span style="color: #6c757d; font-size: 12px;">(Edge ID: ${step.edge_id})</span>
+                </div>
+            `;
+        });
+        
+        printContent += `
+                <div style="margin-top: 30px; font-size: 12px; color: #6c757d; text-align: center;">
+                    Generated by Enhanced Euler Trail Builder
+                </div>
+            </body>
+            </html>
+        `;
+        
+        // Open print window
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(printContent);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
     }
 
     updateDisplay() {
