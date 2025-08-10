@@ -1,28 +1,30 @@
-// Euler Trail Builder - Interactive JavaScript with React Hooks
+// Enhanced Euler Trail Builder - Multiple Edges & Mixed Types Support
 
 class EulerTrailBuilder {
     constructor() {
-        console.log('🎯 EulerTrailBuilder constructor called');
+        console.log('🎯 Enhanced EulerTrailBuilder constructor called');
         this.nodes = new Map();
         this.edges = [];
         this.nodeCounter = 1;
+        this.edgeCounter = 1;
         this.selectedNodes = [];
         this.currentMode = 'node';
-        this.isDirected = false;
+        this.currentEdgeType = 'undirected'; // New: track edge type
+        this.isDirected = false; // Keep for backward compatibility
         this.isAddingNode = false;
         this.draggedNode = null;
         this.dragOffset = { x: 0, y: 0 };
         
-        console.log('🚀 Initializing EulerTrailBuilder...');
+        console.log('🚀 Initializing Enhanced EulerTrailBuilder...');
         this.init();
     }
 
     init() {
-        console.log('⚙️ Setting up event listeners...');
+        console.log('⚙️ Setting up enhanced event listeners...');
         this.setupEventListeners();
         this.setupModals();
         this.updateDisplay();
-        console.log('✅ EulerTrailBuilder initialized successfully');
+        console.log('✅ Enhanced EulerTrailBuilder initialized successfully');
     }
 
     setupEventListeners() {
@@ -36,7 +38,15 @@ class EulerTrailBuilder {
             });
         });
 
-        // Graph type selection
+        // Edge type selection (NEW)
+        document.querySelectorAll('input[name="edgeType"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                this.currentEdgeType = e.target.value;
+                this.showStatus(`Edge type set to ${e.target.value}`);
+            });
+        });
+
+        // Graph type selection (keep for compatibility)
         document.querySelectorAll('input[name="graphType"]').forEach(radio => {
             radio.addEventListener('change', (e) => {
                 this.isDirected = e.target.value === 'directed';
@@ -206,30 +216,33 @@ class EulerTrailBuilder {
     }
 
     addEdge(fromId, toId) {
-        if (fromId === toId) {
-            this.showStatus('Cannot create self-loop', 'error');
+        if (!this.nodes.has(fromId) || !this.nodes.has(toId)) {
+            this.showStatus('Cannot create edge: one or both nodes do not exist', 'error');
             return;
         }
 
-        // Check if edge already exists
-        const existingEdge = this.edges.find(edge => 
-            (edge.from === fromId && edge.to === toId) ||
-            (!this.isDirected && edge.from === toId && edge.to === fromId)
-        );
-
-        if (existingEdge) {
-            this.showStatus('Edge already exists', 'error');
-            return;
-        }
-
-        this.edges.push({
+        // Create edge with current edge type (allow multiple edges between same nodes)
+        const isDirected = this.currentEdgeType === 'directed';
+        const edge = {
             from: fromId,
             to: toId,
-            id: `${fromId}-${toId}`
-        });
+            id: `edge_${this.edgeCounter++}`,
+            source: fromId,  // For API compatibility
+            target: toId,    // For API compatibility
+            directed: isDirected
+        };
 
+        this.edges.push(edge);
+        
+        // Count existing edges between these nodes
+        const existingEdges = this.edges.filter(e => 
+            (e.from === fromId && e.to === toId) ||
+            (!e.directed && e.from === toId && e.to === fromId)
+        );
+        
+        const edgeTypeStr = isDirected ? 'directed' : 'undirected';
+        this.showStatus(`✅ Added ${edgeTypeStr} edge ${fromId} → ${toId} (${existingEdges.length} total between these nodes)`);
         this.updateDisplay();
-        this.showStatus(`Added edge from ${fromId} to ${toId}`);
     }
 
     deleteNode(nodeId) {
@@ -286,13 +299,13 @@ class EulerTrailBuilder {
             this.showStatus('Finding Euler trail...', 'info');
             
             const graphData = {
-                nodes: Array.from(this.nodes.keys()), // Send node IDs as array
+                nodes: Array.from(this.nodes.keys()),
                 edges: this.edges.map(edge => ({
                     id: edge.id,
                     source: edge.from,
-                    target: edge.to
-                })),
-                graph_type: this.isDirected ? 'directed' : 'undirected'
+                    target: edge.to,
+                    directed: edge.directed || false
+                }))
             };
 
             const response = await fetch('http://localhost:5001/api/euler-trail', {
@@ -437,6 +450,24 @@ class EulerTrailBuilder {
         const endX = toNode.x - offsetX;
         const endY = toNode.y - offsetY;
 
+        // Count multiple edges between same nodes for curvature
+        const sameEdges = this.edges.filter(e => 
+            (e.from === edge.from && e.to === edge.to) ||
+            (!e.directed && !edge.directed && e.from === edge.to && e.to === edge.from)
+        );
+        const edgeIndex = sameEdges.findIndex(e => e.id === edge.id);
+        const totalSameEdges = sameEdges.length;
+
+        if (totalSameEdges > 1 || edge.from === edge.to) {
+            // Create curved edge for multiple edges or self-loops
+            this.renderCurvedEdge(svg, startX, startY, endX, endY, edge, edgeIndex, totalSameEdges);
+        } else {
+            // Single straight edge
+            this.renderStraightEdge(svg, startX, startY, endX, endY, edge, index);
+        }
+    }
+
+    renderStraightEdge(svg, startX, startY, endX, endY, edge, index) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', startX);
         line.setAttribute('y1', startY);
@@ -446,25 +477,64 @@ class EulerTrailBuilder {
         line.setAttribute('data-edge-index', index);
         line.setAttribute('data-edge-id', edge.id);
         
-        if (this.isDirected) {
+        // Different colors for directed vs undirected
+        if (edge.directed) {
+            line.setAttribute('stroke', '#e74c3c'); // Red for directed
             line.setAttribute('marker-end', 'url(#arrowhead)');
+        } else {
+            line.setAttribute('stroke', '#3498db'); // Blue for undirected
         }
+        
+        line.setAttribute('stroke-width', '3');
 
         svg.appendChild(line);
+    }
 
-        // Add edge weight/label if needed
-        if (this.isDirected || this.edges.length < 20) {
+    renderCurvedEdge(svg, startX, startY, endX, endY, edge, edgeIndex, totalEdges) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        
+        if (edge.from === edge.to) {
+            // Self-loop
+            const loopRadius = 30;
+            const offsetAngle = (edgeIndex * 60) - 30; // Spread multiple self-loops
+            const fromNode = this.nodes.get(edge.from);
+            const centerX = fromNode.x + loopRadius * Math.cos(offsetAngle * Math.PI / 180);
+            const centerY = fromNode.y + loopRadius * Math.sin(offsetAngle * Math.PI / 180);
+            
+            path.setAttribute('d', `M ${fromNode.x} ${fromNode.y} Q ${centerX} ${centerY} ${fromNode.x} ${fromNode.y}`);
+        } else {
+            // Multiple edges - create curves
             const midX = (startX + endX) / 2;
             const midY = (startY + endY) / 2;
             
-            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            label.setAttribute('x', midX);
-            label.setAttribute('y', midY - 5);
-            label.setAttribute('class', 'edge-label');
-            label.textContent = this.isDirected ? '→' : '';
+            // Calculate perpendicular offset
+            const dx = endX - startX;
+            const dy = endY - startY;
+            const length = Math.sqrt(dx * dx + dy * dy);
             
-            svg.appendChild(label);
+            if (length > 0) {
+                const offset = (edgeIndex - (totalEdges - 1) / 2) * 30;
+                const perpX = -dy / length * offset;
+                const perpY = dx / length * offset;
+                
+                const controlX = midX + perpX;
+                const controlY = midY + perpY;
+                
+                path.setAttribute('d', `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`);
+            }
         }
+        
+        path.setAttribute('stroke', edge.directed ? '#e74c3c' : '#3498db');
+        path.setAttribute('stroke-width', '3');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('data-edge-id', edge.id);
+        path.setAttribute('class', 'edge');
+        
+        if (edge.directed) {
+            path.setAttribute('marker-end', 'url(#arrowhead)');
+        }
+        
+        svg.appendChild(path);
     }
 
     renderNode(svg, node) {
@@ -492,23 +562,32 @@ class EulerTrailBuilder {
     updateGraphInfo() {
         const nodeCount = this.nodes.size;
         const edgeCount = this.edges.length;
+        const directedCount = this.edges.filter(e => e.directed).length;
+        const undirectedCount = this.edges.filter(e => !e.directed).length;
         
-        // Calculate degrees
-        const degrees = new Map();
-        this.nodes.forEach(node => degrees.set(node.id, 0));
-        
+        // Count multiple edges between same node pairs
+        const edgePairs = new Map();
         this.edges.forEach(edge => {
-            degrees.set(edge.from, (degrees.get(edge.from) || 0) + 1);
-            if (!this.isDirected) {
-                degrees.set(edge.to, (degrees.get(edge.to) || 0) + 1);
-            }
+            const key = [edge.from, edge.to].sort().join('-');
+            edgePairs.set(key, (edgePairs.get(key) || 0) + 1);
         });
+        const multipleEdgePairs = Array.from(edgePairs.values()).filter(count => count > 1).length;
 
         // Check connectivity (simplified)
         let isConnected = nodeCount <= 1 || this.isGraphConnected();
 
         document.getElementById('nodeCount').textContent = nodeCount;
         document.getElementById('edgeCount').textContent = edgeCount;
+        
+        // Update enhanced statistics with correct IDs
+        const directedCountEl = document.getElementById('directedEdgeCount');
+        const undirectedCountEl = document.getElementById('undirectedEdgeCount');
+        const multipleEdgesEl = document.getElementById('multipleEdgeCount');
+        
+        if (directedCountEl) directedCountEl.textContent = directedCount;
+        if (undirectedCountEl) undirectedCountEl.textContent = undirectedCount;
+        if (multipleEdgesEl) multipleEdgesEl.textContent = multipleEdgePairs;
+
         document.getElementById('graphConnected').textContent = isConnected ? 'Yes' : 'No';
         document.getElementById('graphConnected').className = isConnected ? 'text-success' : 'text-danger';
     }

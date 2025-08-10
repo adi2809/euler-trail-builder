@@ -75,6 +75,32 @@
                             </div>
                         </div>
 
+                        <!-- NEW: Edge Type Selection -->
+                        <div class="panel-section">
+                            <h3 class="section-title">
+                                <i class="fas fa-arrows-alt"></i>
+                                Edge Type
+                            </h3>
+                            <div class="form-group">
+                                <label class="label">Current Edge Type:</label>
+                                <div class="radio-group">
+                                    <label class="radio-label">
+                                        <input type="radio" name="edgeType" value="undirected" checked>
+                                        <span class="radio-custom"></span>
+                                        Undirected ↔
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="edgeType" value="directed">
+                                        <span class="radio-custom"></span>
+                                        Directed →
+                                    </label>
+                                </div>
+                                <small style="color: #6c757d; font-style: italic;">
+                                    💡 You can mix both types in the same graph!
+                                </small>
+                            </div>
+                        </div>
+
                         <div class="panel-section">
                             <h3 class="section-title">
                                 <i class="fas fa-tools"></i>
@@ -118,8 +144,20 @@
                                     <span id="nodeCount">0</span>
                                 </div>
                                 <div class="info-item">
-                                    <span class="info-label">Edges:</span>
+                                    <span class="info-label">Total Edges:</span>
                                     <span id="edgeCount">0</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Directed:</span>
+                                    <span id="directedEdgeCount" style="color: #e74c3c;">0</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Undirected:</span>
+                                    <span id="undirectedEdgeCount" style="color: #2c3e50;">0</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Multiple Edges:</span>
+                                    <span id="multipleEdgeCount" style="color: #8e44ad;">0</span>
                                 </div>
                                 <div class="info-item">
                                     <span class="info-label">Connected:</span>
