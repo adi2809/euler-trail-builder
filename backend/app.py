@@ -297,6 +297,12 @@ def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[str]]
         if not is_directed:
             adj[v].append((eid, u))
     
+    # Debug adjacency list
+    print(f"\n🔗 ADJACENCY LIST:")
+    for node in sorted(adj.keys()):
+        edges_str = ", ".join([f"{eid}→{target}" for eid, target in adj[node]])
+        print(f"   {node}: [{edges_str}]")
+    
     # Find starting point using our analysis
     ok, start, reason, info = _analyze_mixed_graph(nodes, edges)
     if not ok or start is None:
@@ -306,38 +312,74 @@ def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[str]]
     print(f"🎯 Starting Hierholzer from node: {start}")
     print(f"📊 Analysis result: {info}")
     
-    # Hierholzer's algorithm
-    stack = [start]
-    path = []
-    used_edges = set()
-    
-    # Keep track of remaining edges from each vertex
-    remaining_edges = {node: list(adj[node]) for node in adj}
-    
-    while stack:
-        curr = stack[-1]
+    # Hierholzer's algorithm with circuit finding
+    def find_circuit(start_node):
+        """Find a circuit starting from start_node."""
+        stack = [start_node]
+        circuit = []
+        used_edges = set()
         
-        # Find an unused edge from current vertex
-        while remaining_edges.get(curr, []):
-            eid, next_vertex = remaining_edges[curr].pop()
+        # Keep track of remaining edges from each vertex (local copy)
+        remaining_edges = {node: list(adj[node]) for node in adj}
+        
+        while stack:
+            curr = stack[-1]
             
-            if eid in used_edges:
-                continue
-                
-            used_edges.add(eid)
-            stack.append(next_vertex)
+            # Find an unused edge from current vertex
+            found_edge = False
+            for i, (eid, next_vertex) in enumerate(remaining_edges.get(curr, [])):
+                if eid not in used_edges:
+                    # Use this edge
+                    used_edges.add(eid)
+                    stack.append(next_vertex)
+                    # Remove this edge from all adjacency lists
+                    remaining_edges[curr].pop(i)
+                    # Also remove the reverse edge if it's undirected
+                    edge_obj = next(e for e in edges if e['id'] == eid)
+                    if not edge_obj.get('directed', False):
+                        # Remove reverse edge
+                        for j, (rev_eid, rev_target) in enumerate(remaining_edges.get(next_vertex, [])):
+                            if rev_eid == eid and rev_target == curr:
+                                remaining_edges[next_vertex].pop(j)
+                                break
+                    found_edge = True
+                    break
+            
+            if not found_edge:
+                # No more edges from current vertex, add to circuit
+                circuit.append(stack.pop())
+        
+        return circuit, used_edges
+    
+    # Start with a circuit from the starting node
+    circuit, used_edges = find_circuit(start)
+    
+    # Keep adding circuits until all edges are used
+    while len(used_edges) < len(edges):
+        # Find a vertex in the current circuit that has unused edges
+        start_vertex = None
+        for vertex in circuit:
+            remaining_count = sum(1 for eid, _ in adj.get(vertex, []) if eid not in used_edges)
+            if remaining_count > 0:
+                start_vertex = vertex
+                break
+        
+        if start_vertex is None:
+            print(f"❌ No vertex with unused edges found, but {len(edges) - len(used_edges)} edges remain")
             break
-        else:
-            # No more edges from current vertex, backtrack
-            if len(stack) > 1:
-                path.append(stack.pop())
-            else:
-                # We're at the start with no more edges
-                path.append(stack.pop())
+        
+        # Find a circuit starting from this vertex
+        new_circuit, new_used_edges = find_circuit(start_vertex)
+        used_edges.update(new_used_edges)
+        
+        # Insert the new circuit into the main circuit at the start vertex
+        insert_index = circuit.index(start_vertex)
+        circuit = circuit[:insert_index] + new_circuit[::-1] + circuit[insert_index + 1:]
     
-    path.reverse()
+    # Reverse to get the correct order
+    path = circuit[::-1]
     
-    print(f"🛤️  Constructed path: {' -> '.join(path)}")
+    print(f"🛤️  Final constructed path: {' -> '.join(path)}")
     print(f"🔗 Used {len(used_edges)} of {len(edges)} edges")
     
     # Convert vertex path to edge sequence
@@ -365,8 +407,12 @@ def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[str]]
         
         if found_edge:
             edge_sequence.append(found_edge)
+            print(f"✅ Step {i+1}: {u} -> {v} using edge {found_edge}")
         else:
             print(f"❌ No edge found between {u} and {v}")
+            # Debug: show available edges
+            available_edges = [e for e in edges if e['id'] not in edge_sequence]
+            print(f"   Available edges: {[(e['id'], e['source'], e['target'], e.get('directed', False)) for e in available_edges]}")
             return None
     
     success = len(edge_sequence) == len(edges)
