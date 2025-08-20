@@ -8,6 +8,54 @@ import os
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 
+# --- Utilities ---
+def _normalize_graph_payload(data: dict) -> Tuple[Set[str], List[dict], Dict[str, object], Dict[str, object]]:
+    """Normalize nodes/edges and provide mappings.
+
+    Returns:
+    - norm_nodes: set of node ids as strings
+    - norm_edges: list of edges with 'source'/'target' as strings and 'id' as string
+    - norm_to_orig: mapping from normalized node id (str) to original id (any JSON type)
+    - orig_to_norm: mapping from original id (any JSON type) to normalized (str)
+    """
+    raw_nodes = data.get('nodes', []) or []
+    raw_edges = data.get('edges', []) or []
+
+    orig_to_norm: Dict[object, str] = {}
+    norm_to_orig: Dict[str, object] = {}
+
+    def to_norm(x):
+        if x in orig_to_norm:
+            return orig_to_norm[x]
+        s = str(x)
+        orig_to_norm[x] = s
+        norm_to_orig[s] = x
+        return s
+
+    # Normalize edges first (guarantees we capture all seen nodes)
+    norm_edges: List[dict] = []
+    nodes_from_edges: Set[str] = set()
+    for e in raw_edges:
+        eid = str(e.get('id'))
+        u = to_norm(e.get('source'))
+        v = to_norm(e.get('target'))
+        directed = bool(e.get('directed', False))
+        norm_edges.append({'id': eid, 'source': u, 'target': v, 'directed': directed})
+        nodes_from_edges.add(u)
+        nodes_from_edges.add(v)
+
+    # Normalize provided nodes; ensure mapping exists even for isolated nodes
+    for n in raw_nodes:
+        to_norm(n)
+
+    norm_nodes = set(norm_to_orig.keys())
+    if not norm_nodes:
+        norm_nodes = nodes_from_edges
+    else:
+        norm_nodes |= nodes_from_edges
+
+    return norm_nodes, norm_edges, norm_to_orig, orig_to_norm
+
 # Euler algorithm functions
 def _undirected_connectivity_ok(nodes: Set[str], edges: List[Tuple[str, str]]) -> bool:
     """Check if all non-isolated vertices are connected."""
@@ -81,8 +129,11 @@ def _choose_start_directed(nodes: Set[str], edges: List[Tuple[str, str]]) -> Tup
         return True, start_candidates[0], ""
     return False, None, "Need exactly one start and one end vertex"
 
-def _hierholzer_undirected(nodes: Set[str], edge_items: List[Tuple[str, str, str]]) -> Optional[List[str]]:
-    """Find Euler trail using Hierholzer's algorithm."""
+def _hierholzer_undirected(nodes: Set[str], edge_items: List[Tuple[str, str, str]]) -> Optional[List[Tuple[str, str, str]]]:
+    """Find Euler trail for undirected graph using Hierholzer's algorithm.
+
+    Returns oriented steps as (edge_id, src, dst).
+    """
     adj = defaultdict(list)
     for eid, u, v in edge_items:
         adj[u].append((eid, v))
@@ -93,8 +144,8 @@ def _hierholzer_undirected(nodes: Set[str], edge_items: List[Tuple[str, str, str
         return None
 
     stack = [start]
-    stack_e = []
-    circuit = []
+    stack_e: List[Tuple[str, str, str]] = []  # (eid, from, to)
+    circuit: List[Tuple[str, str, str]] = []
     used = set()
     iters = {u: list(adj[u]) for u in adj}
 
@@ -106,7 +157,7 @@ def _hierholzer_undirected(nodes: Set[str], edge_items: List[Tuple[str, str, str
                 continue
             used.add(eid)
             stack.append(u)
-            stack_e.append(eid)
+            stack_e.append((eid, v, u))
             v = u
         stack.pop()
         if stack_e:
@@ -115,8 +166,8 @@ def _hierholzer_undirected(nodes: Set[str], edge_items: List[Tuple[str, str, str
     circuit.reverse()
     return circuit if len(circuit) == len(edge_items) else None
 
-def _hierholzer_directed(nodes: Set[str], edge_items: List[Tuple[str, str, str]]) -> Optional[List[str]]:
-    """Find Euler trail for directed graph."""
+def _hierholzer_directed(nodes: Set[str], edge_items: List[Tuple[str, str, str]]) -> Optional[List[Tuple[str, str, str]]]:
+    """Find Euler trail for directed graph. Returns (edge_id, src, dst)."""
     adj = defaultdict(list)
     for eid, u, v in edge_items:
         adj[u].append((eid, v))
@@ -126,8 +177,8 @@ def _hierholzer_directed(nodes: Set[str], edge_items: List[Tuple[str, str, str]]
         return None
 
     stack = [start]
-    stack_e = []
-    circuit = []
+    stack_e: List[Tuple[str, str, str]] = []
+    circuit: List[Tuple[str, str, str]] = []
     used = set()
     iters = {u: list(adj[u]) for u in adj}
 
@@ -139,7 +190,7 @@ def _hierholzer_directed(nodes: Set[str], edge_items: List[Tuple[str, str, str]]
                 continue
             used.add(eid)
             stack.append(u)
-            stack_e.append(eid)
+            stack_e.append((eid, v, u))
             v = u
         stack.pop()
         if stack_e:
@@ -154,34 +205,39 @@ def _mixed_connectivity_ok(nodes: Set[str], edges: List[dict]) -> bool:
     # Build adjacency list treating all edges as undirected for connectivity
     adj = defaultdict(set)
     vertices_with_edges = set()
-    
+
     for edge in edges:
         u, v = edge['source'], edge['target']
+        # For connectivity, we consider both directions regardless of edge type
         adj[u].add(v)
         adj[v].add(u)
         vertices_with_edges.add(u)
         vertices_with_edges.add(v)
-    
+
     if not vertices_with_edges:
         return True
-    
+
     # BFS to check connectivity
     start = next(iter(vertices_with_edges))
     visited = {start}
     queue = deque([start])
-    
+
     while queue:
         node = queue.popleft()
         for neighbor in adj[node]:
             if neighbor not in visited:
                 visited.add(neighbor)
                 queue.append(neighbor)
-    
+
     return visited == vertices_with_edges
 
 def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Optional[str], str, dict]:
-    """Analyze mixed graph for Euler trail possibilities."""
-    print(f"\n🔍 ANALYZING MIXED GRAPH:")
+    """Analyze mixed graph and propose a start node.
+
+    More permissive: only require connectivity. We'll attempt construction even if
+    degree balances look odd, since undirected edges can be oriented during traversal.
+    """
+    print("\n🔍 ANALYZING MIXED GRAPH:")
     print(f"📊 Nodes: {sorted(nodes)}")
     print(f"🔗 Total edges: {len(edges)}")
     
@@ -197,27 +253,30 @@ def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Opti
     for edge in undirected_edges:
         print(f"   {edge['source']} ↔ {edge['target']} (ID: {edge['id']})")
     
-    # Calculate degrees more carefully for mixed graphs
+    # Degree tallies. Keep both: (a) directed-only in/out, (b) total incident degree.
     in_degree = defaultdict(int)
     out_degree = defaultdict(int)
-    
-    # For directed edges: count in-degree and out-degree separately
+    total_deg = defaultdict(int)
+
+    # Directed edges contribute to in/out and incident totals
     for edge in directed_edges:
-        out_degree[edge['source']] += 1
-        in_degree[edge['target']] += 1
-    
-    # For undirected edges: each contributes equally to both in and out degree
+        u, v = edge['source'], edge['target']
+        out_degree[u] += 1
+        in_degree[v] += 1
+        total_deg[u] += 1
+        total_deg[v] += 1
+
+    # Undirected edges are incident to both endpoints; they don't change net out-in
     for edge in undirected_edges:
-        in_degree[edge['source']] += 1
-        out_degree[edge['source']] += 1
-        in_degree[edge['target']] += 1
-        out_degree[edge['target']] += 1
+        u, v = edge['source'], edge['target']
+        total_deg[u] += 1
+        total_deg[v] += 1
     
-    print(f"\n📈 DEGREE ANALYSIS:")
+    print("\n📈 DEGREE ANALYSIS:")
     for node in sorted(nodes):
-        if in_degree[node] > 0 or out_degree[node] > 0:
+        if total_deg[node] > 0 or in_degree[node] > 0 or out_degree[node] > 0:
             balance = out_degree[node] - in_degree[node]
-            print(f"   Node {node}: in={in_degree[node]}, out={out_degree[node]}, balance={balance:+d}")
+            print(f"   Node {node}: in={in_degree[node]}, out={out_degree[node]}, balance={balance:+d}, incident={total_deg[node]}")
     
     # Check connectivity
     if not _mixed_connectivity_ok(nodes, edges):
@@ -226,211 +285,113 @@ def _analyze_mixed_graph(nodes: Set[str], edges: List[dict]) -> Tuple[bool, Opti
     
     print("✅ Graph is connected")
     
-    # Analyze degree conditions for mixed Euler trail
-    problematic_nodes = []
-    start_candidates = []
-    end_candidates = []
-    
-    for node in nodes:
-        # Skip isolated nodes
-        if in_degree[node] == 0 and out_degree[node] == 0:
-            continue
-            
-        if in_degree[node] == out_degree[node]:
-            continue  # Balanced node, good for Euler cycle
-        elif out_degree[node] - in_degree[node] == 1:
-            start_candidates.append(node)
-        elif in_degree[node] - out_degree[node] == 1:
-            end_candidates.append(node)
-        else:
-            problematic_nodes.append(node)
-    
-    print(f"\n🎯 EULER ANALYSIS:")
-    print(f"   Start candidates (out-degree > in-degree by 1): {start_candidates}")
-    print(f"   End candidates (in-degree > out-degree by 1): {end_candidates}")
-    print(f"   Problematic nodes: {problematic_nodes}")
-    
-    if problematic_nodes:
-        error_msg = f"Nodes {problematic_nodes} have invalid degree balance for Euler trail"
-        print(f"❌ {error_msg}")
-        return False, None, error_msg, {}
-    
-    # Determine if Euler trail exists
-    if len(start_candidates) == 0 and len(end_candidates) == 0:
-        # Euler cycle exists
-        start_node = next((n for n in nodes if out_degree[n] > 0), None)
-        print(f"🔄 Euler CYCLE found, starting from: {start_node}")
-        return True, start_node, "Euler cycle found", {
-            'type': 'cycle',
+    # Propose a start vertex
+    start_candidates = [n for n in nodes if (out_degree[n] - in_degree[n]) == 1]
+    end_candidates = [n for n in nodes if (in_degree[n] - out_degree[n]) == 1]
+
+    # Prefer the classical directed start if it uniquely exists
+    if len(start_candidates) == 1 and len(end_candidates) == 1:
+        start_node = start_candidates[0]
+        print(f"🛤️  Proposed start: {start_node} (directed start/end pattern)")
+        return True, start_node, "Proposed start based on directed imbalance", {
+            'type': 'path-or-cycle',
             'start': start_node,
-            'directed_edges': len(directed_edges),
-            'undirected_edges': len(undirected_edges)
-        }
-    elif len(start_candidates) == 1 and len(end_candidates) == 1:
-        # Euler path exists
-        print(f"🛤️  Euler PATH found: {start_candidates[0]} → {end_candidates[0]}")
-        return True, start_candidates[0], "Euler path found", {
-            'type': 'path',
-            'start': start_candidates[0],
             'end': end_candidates[0],
             'directed_edges': len(directed_edges),
             'undirected_edges': len(undirected_edges)
         }
-    else:
-        error_msg = f"Invalid start/end configuration: {len(start_candidates)} starts, {len(end_candidates)} ends"
-        print(f"❌ {error_msg}")
-        return False, None, error_msg, {}
 
-def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[str]]:
-    """Find Euler trail using Hierholzer's algorithm for mixed graphs."""
-    # Build adjacency list with proper direction handling
-    adj = defaultdict(list)
-    
-    for edge in edges:
-        eid = edge['id']
-        u, v = edge['source'], edge['target']
-        is_directed = edge.get('directed', False)
-        
-        # For directed edges: u -> v only
-        # For undirected edges: u <-> v (both directions)
-        adj[u].append((eid, v))
-        if not is_directed:
-            adj[v].append((eid, u))
-    
-    # Debug adjacency list
-    print(f"\n🔗 ADJACENCY LIST:")
-    for node in sorted(adj.keys()):
-        edges_str = ", ".join([f"{eid}→{target}" for eid, target in adj[node]])
-        print(f"   {node}: [{edges_str}]")
-    
-    # Find starting point using our analysis
+    # Otherwise pick any vertex incident to at least one edge
+    start_node = next((n for n in nodes if total_deg[n] > 0 or out_degree[n] > 0), None)
+    if start_node is None:
+        return False, None, "Graph has no edges", {}
+        print(f"🔄 Proposed start (generic): {start_node}")
+    return True, start_node, "Proposed generic start (connectivity ok)", {
+        'type': 'unknown',
+        'start': start_node,
+        'directed_edges': len(directed_edges),
+        'undirected_edges': len(undirected_edges)
+    }
+
+def _hierholzer_mixed(nodes: Set[str], edges: List[dict]) -> Optional[List[Tuple[str, str, str]]]:
+    """Proper Hierholzer traversal for mixed graphs (directed + undirected).
+
+    Builds a single continuous trail (no teleports). Returns a list of edge IDs
+    in traversal order, or None if an Euler trail doesn't exist.
+    """
+
+    # Analyze to pick a valid starting vertex
     ok, start, reason, info = _analyze_mixed_graph(nodes, edges)
     if not ok or start is None:
         print(f"❌ Mixed graph analysis failed: {reason}")
         return None
-    
-    print(f"🎯 Starting Hierholzer from node: {start}")
-    print(f"📊 Analysis result: {info}")
-    
-    # Hierholzer's algorithm with circuit finding
-    def find_circuit(start_node):
-        """Find a circuit starting from start_node."""
-        stack = [start_node]
-        circuit = []
-        used_edges = set()
-        
-        # Keep track of remaining edges from each vertex (local copy)
-        remaining_edges = {node: list(adj[node]) for node in adj}
-        
-        while stack:
-            curr = stack[-1]
-            
-            # Find an unused edge from current vertex
-            found_edge = False
-            for i, (eid, next_vertex) in enumerate(remaining_edges.get(curr, [])):
-                if eid not in used_edges:
-                    # Use this edge
-                    used_edges.add(eid)
-                    stack.append(next_vertex)
-                    # Remove this edge from all adjacency lists
-                    remaining_edges[curr].pop(i)
-                    # Also remove the reverse edge if it's undirected
-                    edge_obj = next(e for e in edges if e['id'] == eid)
-                    if not edge_obj.get('directed', False):
-                        # Remove reverse edge
-                        for j, (rev_eid, rev_target) in enumerate(remaining_edges.get(next_vertex, [])):
-                            if rev_eid == eid and rev_target == curr:
-                                remaining_edges[next_vertex].pop(j)
-                                break
-                    found_edge = True
-                    break
-            
-            if not found_edge:
-                # No more edges from current vertex, add to circuit
-                circuit.append(stack.pop())
-        
-        return circuit, used_edges
-    
-    # Start with a circuit from the starting node
-    circuit, used_edges = find_circuit(start)
-    
-    # Keep adding circuits until all edges are used
-    while len(used_edges) < len(edges):
-        # Find a vertex in the current circuit that has unused edges
-        start_vertex = None
-        for vertex in circuit:
-            remaining_count = sum(1 for eid, _ in adj.get(vertex, []) if eid not in used_edges)
-            if remaining_count > 0:
-                start_vertex = vertex
-                break
-        
-        if start_vertex is None:
-            print(f"❌ No vertex with unused edges found, but {len(edges) - len(used_edges)} edges remain")
-            break
-        
-        # Find a circuit starting from this vertex
-        new_circuit, new_used_edges = find_circuit(start_vertex)
-        used_edges.update(new_used_edges)
-        
-        # Insert the new circuit into the main circuit at the start vertex
-        insert_index = circuit.index(start_vertex)
-        circuit = circuit[:insert_index] + new_circuit[::-1] + circuit[insert_index + 1:]
-    
-    # Reverse to get the correct order
-    path = circuit[::-1]
-    
-    print(f"🛤️  Final constructed path: {' -> '.join(path)}")
-    print(f"🔗 Used {len(used_edges)} of {len(edges)} edges")
-    
-    # Convert vertex path to edge sequence
-    if len(path) < 2:
-        print("❌ Path too short")
-        return None
-    
-    edge_sequence = []
-    for i in range(len(path) - 1):
-        u, v = path[i], path[i + 1]
-        
-        # Find the correct edge between u and v that hasn't been used in sequence
-        found_edge = None
-        for edge in edges:
-            if edge['id'] in edge_sequence:
-                continue  # Already used in sequence
-                
-            # Check if this edge connects u to v correctly
-            if edge['source'] == u and edge['target'] == v:
-                found_edge = edge['id']
-                break
-            elif not edge.get('directed', False) and edge['source'] == v and edge['target'] == u:
-                found_edge = edge['id']
-                break
-        
-        if found_edge:
-            edge_sequence.append(found_edge)
-            print(f"✅ Step {i+1}: {u} -> {v} using edge {found_edge}")
-        else:
-            print(f"❌ No edge found between {u} and {v}")
-            # Debug: show available edges
-            available_edges = [e for e in edges if e['id'] not in edge_sequence]
-            print(f"   Available edges: {[(e['id'], e['source'], e['target'], e.get('directed', False)) for e in available_edges]}")
-            return None
-    
-    success = len(edge_sequence) == len(edges)
-    print(f"🎉 Trail construction {'successful' if success else 'failed'}: {len(edge_sequence)}/{len(edges)} edges")
-    
-    return edge_sequence if success else None
 
-# API Routes
+    print(f"🖊️  Starting Hierholzer traversal at: {start}")
+
+    # Map edge id -> edge for quick lookup
+    edge_map: Dict[str, dict] = {e['id']: e for e in edges}
+
+    # Build adjacency: for directed edges add u->v only; for undirected add both ways.
+    adj: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    for e in edges:
+        u, v = e['source'], e['target']
+        if e.get('directed', False):
+            adj[u].append((e['id'], v))
+        else:
+            adj[u].append((e['id'], v))
+            adj[v].append((e['id'], u))
+
+    # Iterators we can pop from as we traverse
+    iters: Dict[str, List[Tuple[str, str]]] = {u: list(adj[u]) for u in adj}
+
+    used: Set[str] = set()  # edge ids used
+    stack: List[str] = [start]
+    stack_e: List[Tuple[str, str, str]] = []  # (eid, from, to)
+    circuit: List[Tuple[str, str, str]] = []  # oriented edges in reverse
+
+    while stack:
+        v = stack[-1]
+        # Advance along unused outgoing edges from v
+        progressed = False
+        while iters.get(v):
+            eid, u = iters[v].pop()
+            if eid in used:
+                continue
+            # Ensure directed constraint: we only added legal directions above
+            used.add(eid)
+            stack.append(u)
+            stack_e.append((eid, v, u))
+            progressed = True
+            v = u
+        if not progressed:
+            # Backtrack, add the last edge to circuit
+            stack.pop()
+            if stack_e:
+                circuit.append(stack_e.pop())
+
+    circuit.reverse()
+
+    # Validate: we must have used exactly all edges once
+    if len(circuit) != len(edges):
+        print("❌ Hierholzer failed: circuit doesn't cover all edges")
+        return None
+
+    print("✅ Successfully built a continuous Euler trail for mixed graph")
+    return circuit
+
+# Resolve absolute path to the frontend directory (../frontend relative to this file)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_FRONTEND_DIR = os.path.abspath(os.path.join(_BASE_DIR, '..', 'frontend'))
 
 @app.route('/')
 def serve_frontend():
-    """Serve the React frontend."""
-    return send_from_directory('../frontend', 'index.html')
+    """Serve index.html for the app root."""
+    return send_from_directory(_FRONTEND_DIR, 'index.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
     """Serve static files."""
-    return send_from_directory('../frontend', path)
+    return send_from_directory(_FRONTEND_DIR, path)
 
 @app.route('/api/euler-trail', methods=['POST'])
 def find_euler_trail():
@@ -439,10 +400,9 @@ def find_euler_trail():
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'No data provided', 'trail': None}), 400
-            
-        nodes = set(data.get('nodes', []))
-        edges = data.get('edges', [])
-        
+
+        nodes, edges, norm_to_orig, orig_to_norm = _normalize_graph_payload(data)
+
         if not edges:
             return jsonify({
                 'success': False,
@@ -451,107 +411,60 @@ def find_euler_trail():
                 'analysis': None
             })
         
-        # Check if this is a mixed graph or legacy format
-        has_mixed_edges = any(isinstance(edge, dict) and 'directed' in edge for edge in edges)
-        
-        if has_mixed_edges:
-            # Use new mixed graph algorithm
+        # Choose algorithm based on edge types
+        all_directed = all(e.get('directed', False) for e in edges)
+        none_directed = all(not e.get('directed', False) for e in edges)
+
+        analysis = None
+        if none_directed:
+            # Undirected
+            ok, start, reason = _choose_start_undirected(nodes, [(e['source'], e['target']) for e in edges])
+            if not ok or start is None:
+                return jsonify({'success': False, 'error': reason, 'trail': None, 'analysis': {'type': 'undirected'}})
+            trail = _hierholzer_undirected(nodes, [(e['id'], e['source'], e['target']) for e in edges])
+        elif all_directed:
+            # Directed
+            ok, start, reason = _choose_start_directed(nodes, [(e['source'], e['target']) for e in edges])
+            if not ok or start is None:
+                return jsonify({'success': False, 'error': reason, 'trail': None, 'analysis': {'type': 'directed'}})
+            trail = _hierholzer_directed(nodes, [(e['id'], e['source'], e['target']) for e in edges])
+        else:
+            # Mixed
             ok, start, reason, analysis = _analyze_mixed_graph(nodes, edges)
-            
-            if not ok:
-                return jsonify({
-                    'success': False,
-                    'error': reason,
-                    'trail': None,
-                    'analysis': analysis
-                })
-            
-            # Find Euler trail
+            if not ok or start is None:
+                return jsonify({'success': False, 'error': reason, 'trail': None, 'analysis': analysis})
             trail = _hierholzer_mixed(nodes, edges)
-            
-            if trail is None:
-                return jsonify({
-                    'success': False,
-                    'error': 'Could not construct Euler trail',
-                    'trail': None,
-                    'analysis': analysis
-                })
-            
-            # Create trail steps
-            edge_map = {edge['id']: edge for edge in edges}
-            trail_steps = []
-            
-            for i, edge_id in enumerate(trail, 1):
-                edge = edge_map[edge_id]
-                trail_steps.append({
-                    'step': i,
-                    'edge_id': edge_id,
-                    'source': edge['source'],
-                    'target': edge['target'],
-                    'directed': edge.get('directed', False)
-                })
-            
+
+        if trail is None:
             return jsonify({
-                'success': True,
-                'error': None,
-                'trail': trail_steps,
+                'success': False,
+                'error': 'Could not construct Euler trail',
+                'trail': None,
                 'analysis': analysis
             })
-        else:
-            # Legacy format - convert and use original algorithm
-            graph_type = data.get('graph_type', 'undirected')
-            
-            # Convert edges to the format needed by algorithm
-            edge_items = [(edge['id'], edge['source'], edge['target']) for edge in edges]
-            
-            if graph_type == 'undirected':
-                trail = _hierholzer_undirected(nodes, edge_items)
-                if trail is None:
-                    ok, start, reason = _choose_start_undirected(nodes, [(e['source'], e['target']) for e in edges])
-                    return jsonify({
-                        'success': False,
-                        'error': reason or 'No Euler trail exists',
-                        'trail': None
-                    })
-            else:  # directed
-                trail = _hierholzer_directed(nodes, edge_items)
-                if trail is None:
-                    ok, start, reason = _choose_start_directed(nodes, [(e['source'], e['target']) for e in edges])
-                    return jsonify({
-                        'success': False,
-                        'error': reason or 'No Euler trail exists',
-                        'trail': None
-                    })
-            
-            # Create trail with steps
-            edge_map = {edge['id']: edge for edge in edges}
-            trail_steps = []
-            for i, edge_id in enumerate(trail, 1):
-                edge = edge_map[edge_id]
-                trail_steps.append({
-                    'step': i,
-                    'edge_id': edge_id,
-                    'source': edge['source'],
-                    'target': edge['target']
-                })
-            
-            return jsonify({
-                'success': True,
-                'error': None,
-                'trail': trail_steps
+
+        # Create trail steps
+        edge_map = {edge['id']: edge for edge in edges}
+        trail_steps = []
+
+        for i, (edge_id, src, dst) in enumerate(trail, 1):
+            edge = edge_map[edge_id]
+            # Map back to original node IDs for the response
+            src_orig = norm_to_orig.get(src, src)
+            dst_orig = norm_to_orig.get(dst, dst)
+            trail_steps.append({
+                'step': i,
+                'edge_id': edge_id,
+                'source': src_orig,
+                'target': dst_orig,
+                'directed': edge.get('directed', False)
             })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'trail': None
-        }), 500
-        
+
         return jsonify({
             'success': True,
             'error': None,
-            'trail': trail_steps
+            'trail': trail_steps,
+            'analysis': analysis
         })
         
     except Exception as e:
@@ -566,45 +479,49 @@ def get_graph_info():
     """Get information about the graph structure."""
     try:
         data = request.json
-        nodes = data.get('nodes', [])
-        edges = data.get('edges', [])
-        graph_type = data.get('graph_type', 'undirected')
-        
-        # Calculate degrees
-        degrees = defaultdict(lambda: {'in': 0, 'out': 0, 'total': 0})
-        
+        nodes, edges, norm_to_orig, orig_to_norm = _normalize_graph_payload(data)
+
+        # Calculate degrees for mixed graph
+        in_degree = defaultdict(int)
+        out_degree = defaultdict(int)
+
+        # Separate directed and undirected edges
+        directed_count = 0
+        undirected_count = 0
+
         for edge in edges:
             source, target = edge['source'], edge['target']
-            if graph_type == 'directed':
-                degrees[source]['out'] += 1
-                degrees[target]['in'] += 1
+            is_directed = edge.get('directed', False)
+
+            if is_directed:
+                directed_count += 1
+                out_degree[source] += 1
+                in_degree[target] += 1
             else:
-                degrees[source]['total'] += 1
-                degrees[target]['total'] += 1
-        
+                undirected_count += 1
+                out_degree[source] += 1
+                in_degree[source] += 1
+                out_degree[target] += 1
+                in_degree[target] += 1
+
         # Prepare node info
         node_info = []
         for node in nodes:
-            if graph_type == 'directed':
-                node_info.append({
-                    'id': node,
-                    'in_degree': degrees[node]['in'],
-                    'out_degree': degrees[node]['out'],
-                    'total_degree': degrees[node]['in'] + degrees[node]['out']
-                })
-            else:
-                node_info.append({
-                    'id': node,
-                    'degree': degrees[node]['total']
-                })
-        
+            node_info.append({
+                'id': norm_to_orig.get(node, node),
+                'in_degree': in_degree[node],
+                'out_degree': out_degree[node],
+                'total_degree': in_degree[node] + out_degree[node]
+            })
+
         return jsonify({
             'nodes': node_info,
             'edge_count': len(edges),
             'node_count': len(nodes),
-            'graph_type': graph_type
+            'directed_edges': directed_count,
+            'undirected_edges': undirected_count
         })
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -350,7 +350,8 @@ body {
 }
 
 .graph-canvas {
-    height: 500px;
+    height: 600px;
+    width: 100%;
     position: relative;
     overflow: hidden;
     background: #fafafa;
@@ -398,6 +399,7 @@ body {
     stroke: white;
     stroke-width: 2;
     filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.3));
+    r: 15px;
 }
 
 .node-circle.pending {
@@ -503,6 +505,86 @@ body {
     padding: 25px;
     overflow-y: auto;
     max-height: 60vh;
+}
+
+/* Simulation Controls */
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--success-color);
+    transition: width 0.3s ease;
+    border-radius: 4px;
+}
+
+.progress-text {
+    font-size: 0.85rem;
+    color: var(--secondary-color);
+    text-align: center;
+}
+
+.simulation-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.btn-sm {
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    min-width: 80px;
+}
+
+.btn-xs {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    min-width: 60px;
+}
+
+.speed-buttons {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+}
+
+.speed-buttons .btn-xs {
+    flex: 1;
+}
+
+.speed-buttons .btn-xs.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* Enhanced Edge Animation */
+.edge.simulation-highlight {
+    stroke: var(--danger-color);
+    stroke-width: 6;
+    filter: drop-shadow(0 0 6px rgba(220, 53, 69, 0.5));
+}
+
+.edge.simulation-current {
+    stroke: var(--success-color);
+    stroke-width: 8;
+    filter: drop-shadow(0 0 8px rgba(40, 167, 69, 0.7));
+}
+
+.node.simulation-current {
+    filter: drop-shadow(0 0 8px rgba(40, 167, 69, 0.7));
+}
+
+.node.simulation-current .node-circle {
+    stroke: var(--success-color);
+    stroke-width: 4;
+    filter: drop-shadow(0 0 8px rgba(40, 167, 69, 0.7));
 }
 
 /* Utility Classes */
