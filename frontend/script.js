@@ -9,11 +9,20 @@ class EulerTrailBuilder {
         this.edgeCounter = 1;
         this.selectedNodes = [];
         this.currentMode = 'node';
-        this.currentEdgeType = 'undirected'; // New: track edge type
-        this.isDirected = false; // Keep for backward compatibility
+        this.currentEdgeType = 'undirected'; // Track edge type for new edges
         this.isAddingNode = false;
         this.draggedNode = null;
         this.dragOffset = { x: 0, y: 0 };
+
+        // Simulation properties
+        this.currentTrail = null;
+        this.simulationState = {
+            isPlaying: false,
+            currentStep: 0,
+            totalSteps: 0,
+            speed: 1500, // milliseconds
+            interval: null
+        };
         
         console.log('🚀 Initializing Enhanced EulerTrailBuilder...');
         this.init();
@@ -46,14 +55,7 @@ class EulerTrailBuilder {
             });
         });
 
-        // Graph type selection (keep for compatibility)
-        document.querySelectorAll('input[name="graphType"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                this.isDirected = e.target.value === 'directed';
-                this.updateDisplay();
-                this.showStatus(`Graph type changed to: ${this.isDirected ? 'directed' : 'undirected'}`);
-            });
-        });
+
 
         // Action buttons
         document.getElementById('clearGraph').addEventListener('click', () => {
@@ -64,8 +66,38 @@ class EulerTrailBuilder {
             this.findEulerTrail();
         });
 
+        document.getElementById('simulateTrail').addEventListener('click', () => {
+            this.showSimulationControls();
+        });
+
         document.getElementById('showHelp').addEventListener('click', () => {
             this.showHelpModal();
+        });
+
+        // Simulation controls
+        document.getElementById('playPauseBtn').addEventListener('click', () => {
+            this.toggleSimulation();
+        });
+
+        document.getElementById('stepBtn').addEventListener('click', () => {
+            this.stepSimulation();
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            this.resetSimulation();
+        });
+
+        // Speed controls
+        document.getElementById('slowSpeed').addEventListener('click', () => {
+            this.setSimulationSpeed(2000);
+        });
+
+        document.getElementById('mediumSpeed').addEventListener('click', () => {
+            this.setSimulationSpeed(1500);
+        });
+
+        document.getElementById('fastSpeed').addEventListener('click', () => {
+            this.setSimulationSpeed(1000);
         });
 
         // Print trail button
@@ -152,10 +184,15 @@ class EulerTrailBuilder {
             const rect = e.currentTarget.getBoundingClientRect();
             const nodeId = this.draggedNode.dataset.nodeId;
             const node = this.nodes.get(nodeId);
-            
-            node.x = Math.max(25, Math.min(575, e.clientX - rect.left - this.dragOffset.x));
-            node.y = Math.max(25, Math.min(475, e.clientY - rect.top - this.dragOffset.y));
-            
+
+            const nodeRadius = 15;
+            const margin = nodeRadius + 5;
+            const canvasWidth = 800;
+            const canvasHeight = 600;
+
+            node.x = Math.max(margin, Math.min(canvasWidth - margin, e.clientX - rect.left - this.dragOffset.x));
+            node.y = Math.max(margin, Math.min(canvasHeight - margin, e.clientY - rect.top - this.dragOffset.y));
+
             this.updateDisplay();
         }
     }
@@ -166,9 +203,14 @@ class EulerTrailBuilder {
 
     addNode(x, y) {
         console.log('➕ Adding node at:', x, y);
-        // Ensure node is within bounds
-        x = Math.max(25, Math.min(575, x));
-        y = Math.max(25, Math.min(475, y));
+        // Allow nodes to be placed anywhere in the canvas with proper margins
+        const nodeRadius = 15; // Reduced node size
+        const margin = nodeRadius + 5;
+        const canvasWidth = 800; // Canvas width
+        const canvasHeight = 600; // Canvas height
+
+        x = Math.max(margin, Math.min(canvasWidth - margin, x));
+        y = Math.max(margin, Math.min(canvasHeight - margin, y));
 
         const nodeId = this.nodeCounter.toString();
         this.nodes.set(nodeId, {
@@ -272,6 +314,13 @@ class EulerTrailBuilder {
         this.edges = [];
         this.selectedNodes = [];
         this.nodeCounter = 1;
+
+        // Reset simulation state
+        this.currentTrail = null;
+        this.resetSimulation();
+        this.hideSimulationControls();
+        document.getElementById('simulateTrail').style.display = 'none';
+
         this.updateDisplay();
         this.showStatus('Graph cleared');
     }
@@ -327,6 +376,7 @@ class EulerTrailBuilder {
                 if (result.trail && result.trail.length > 0) {
                     this.highlightEulerTrail(result.trail);
                     this.showEulerTrailModal(result);
+                    this.initializeSimulation(result);
                 } else {
                     this.showStatus('No Euler trail exists for this graph', 'warning');
                 }
@@ -342,18 +392,16 @@ class EulerTrailBuilder {
     highlightEulerTrail(trail) {
         // Clear previous highlights
         document.querySelectorAll('.edge').forEach(edge => {
-            edge.classList.remove('highlighted');
+            edge.classList.remove('highlighted', 'simulation-highlight', 'simulation-current');
+        });
+        document.querySelectorAll('.node').forEach(node => {
+            node.classList.remove('simulation-current');
         });
 
         // Highlight trail edges with delay for animation
         trail.forEach((edgeStep, index) => {
             setTimeout(() => {
-                // The backend returns steps with source/target, convert to our edge ID format
-                const edgeId = `${edgeStep.source}-${edgeStep.target}`;
-                const reverseEdgeId = `${edgeStep.target}-${edgeStep.source}`;
-                
-                const edgeElement = document.querySelector(`[data-edge-id="${edgeId}"]`) ||
-                                 document.querySelector(`[data-edge-id="${reverseEdgeId}"]`);
+                const edgeElement = document.querySelector(`[data-edge-id="${edgeStep.edge_id}"]`);
                 if (edgeElement) {
                     edgeElement.classList.add('highlighted');
                 }
@@ -419,6 +467,29 @@ class EulerTrailBuilder {
                 `;
             });
             html += '</div>';
+        }
+
+        // Add simulation section
+        if (result.trail.length > 0) {
+            html += `
+                <h4 style="margin: 20px 0 10px 0;">🎬 Trail Simulation</h4>
+                <div style="background: #e9ecef; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <div id="simulationStepInfo" style="margin-bottom: 10px;">
+                        <div style="color: #6c757d; font-style: italic;">
+                            Click "Simulate Trail" in the control panel to see the trail animation step by step.
+                        </div>
+                    </div>
+                    <div style="font-size: 0.9rem; color: #6c757d;">
+                        <strong>Features:</strong>
+                        <ul style="margin: 5px 0; padding-left: 20px;">
+                            <li>Step-by-step animation with play/pause controls</li>
+                            <li>Adjustable simulation speed (Slow/Medium/Fast)</li>
+                            <li>Visual progress tracking</li>
+                            <li>Real-time step information</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
         }
 
         content.innerHTML = html;
@@ -578,7 +649,7 @@ class EulerTrailBuilder {
         const distance = Math.sqrt(dx * dx + dy * dy);
         
         // Calculate edge endpoints (offset by node radius)
-        const nodeRadius = 25;
+        const nodeRadius = 15;
         const offsetX = (dx / distance) * nodeRadius;
         const offsetY = (dy / distance) * nodeRadius;
         
@@ -682,7 +753,7 @@ class EulerTrailBuilder {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', node.x);
         circle.setAttribute('cy', node.y);
-        circle.setAttribute('r', 25);
+        circle.setAttribute('r', 15);
         circle.setAttribute('class', `node-circle ${this.selectedNodes.includes(node.id) ? 'pending' : ''}`);
 
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -701,7 +772,7 @@ class EulerTrailBuilder {
         const edgeCount = this.edges.length;
         const directedCount = this.edges.filter(e => e.directed).length;
         const undirectedCount = this.edges.filter(e => !e.directed).length;
-        
+
         // Count multiple edges between same node pairs
         const edgePairs = new Map();
         this.edges.forEach(edge => {
@@ -710,17 +781,17 @@ class EulerTrailBuilder {
         });
         const multipleEdgePairs = Array.from(edgePairs.values()).filter(count => count > 1).length;
 
-        // Check connectivity (simplified)
-        let isConnected = nodeCount <= 1 || this.isGraphConnected();
+        // Check connectivity for mixed graph
+        let isConnected = nodeCount <= 1 || this.isMixedGraphConnected();
 
         document.getElementById('nodeCount').textContent = nodeCount;
         document.getElementById('edgeCount').textContent = edgeCount;
-        
-        // Update enhanced statistics with correct IDs
+
+        // Update statistics
         const directedCountEl = document.getElementById('directedEdgeCount');
         const undirectedCountEl = document.getElementById('undirectedEdgeCount');
         const multipleEdgesEl = document.getElementById('multipleEdgeCount');
-        
+
         if (directedCountEl) directedCountEl.textContent = directedCount;
         if (undirectedCountEl) undirectedCountEl.textContent = undirectedCount;
         if (multipleEdgesEl) multipleEdgesEl.textContent = multipleEdgePairs;
@@ -729,26 +800,24 @@ class EulerTrailBuilder {
         document.getElementById('graphConnected').className = isConnected ? 'text-success' : 'text-danger';
     }
 
-    isGraphConnected() {
+    isMixedGraphConnected() {
         if (this.nodes.size <= 1) return true;
-        
-        // Simple connectivity check using DFS
+
+        // Mixed graph connectivity check - treat all edges as undirected for connectivity
         const visited = new Set();
         const adjacency = new Map();
-        
-        // Build adjacency list
+
+        // Build adjacency list (undirected for connectivity)
         this.nodes.forEach(node => adjacency.set(node.id, []));
         this.edges.forEach(edge => {
             adjacency.get(edge.from).push(edge.to);
-            if (!this.isDirected) {
-                adjacency.get(edge.to).push(edge.from);
-            }
+            adjacency.get(edge.to).push(edge.from); // Always add both directions for connectivity
         });
 
         // DFS from first node
         const firstNode = this.nodes.keys().next().value;
         const stack = [firstNode];
-        
+
         while (stack.length > 0) {
             const current = stack.pop();
             if (!visited.has(current)) {
@@ -764,19 +833,184 @@ class EulerTrailBuilder {
         return visited.size === this.nodes.size;
     }
 
+    // Simulation Methods
+    showSimulationControls() {
+        document.getElementById('simulationControls').style.display = 'block';
+        document.getElementById('simulateTrail').style.display = 'none';
+        this.showStatus('Simulation controls activated', 'info');
+    }
+
+    hideSimulationControls() {
+        document.getElementById('simulationControls').style.display = 'none';
+        document.getElementById('simulateTrail').style.display = 'inline-block';
+    }
+
+    setSimulationSpeed(speed) {
+        this.simulationState.speed = speed;
+
+        // Update active speed button
+        document.querySelectorAll('.speed-buttons .btn-xs').forEach(btn => {
+            btn.classList.remove('active');
+        });
+
+        const speedMap = { 2000: 'slowSpeed', 1500: 'mediumSpeed', 1000: 'fastSpeed' };
+        document.getElementById(speedMap[speed]).classList.add('active');
+
+        // Restart simulation if playing
+        if (this.simulationState.isPlaying) {
+            this.pauseSimulation();
+            this.playSimulation();
+        }
+
+        this.showStatus(`Simulation speed set to ${speed}ms`, 'info');
+    }
+
+    toggleSimulation() {
+        if (this.simulationState.isPlaying) {
+            this.pauseSimulation();
+        } else {
+            this.playSimulation();
+        }
+    }
+
+    playSimulation() {
+        if (!this.currentTrail || this.simulationState.currentStep >= this.simulationState.totalSteps) {
+            this.resetSimulation();
+        }
+
+        this.simulationState.isPlaying = true;
+        const playBtn = document.getElementById('playPauseBtn');
+        playBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
+        playBtn.className = 'btn btn-sm btn-warning';
+
+        this.simulationState.interval = setInterval(() => {
+            this.stepSimulation();
+            if (this.simulationState.currentStep >= this.simulationState.totalSteps) {
+                this.pauseSimulation();
+                this.showStatus('Simulation completed!', 'success');
+            }
+        }, this.simulationState.speed);
+    }
+
+    pauseSimulation() {
+        this.simulationState.isPlaying = false;
+        const playBtn = document.getElementById('playPauseBtn');
+        playBtn.innerHTML = '<i class="fas fa-play"></i> Play';
+        playBtn.className = 'btn btn-sm btn-success';
+
+        if (this.simulationState.interval) {
+            clearInterval(this.simulationState.interval);
+            this.simulationState.interval = null;
+        }
+    }
+
+    stepSimulation() {
+        if (!this.currentTrail || this.simulationState.currentStep >= this.simulationState.totalSteps) {
+            return;
+        }
+
+        const step = this.currentTrail[this.simulationState.currentStep];
+        this.animateTrailStep(step, this.simulationState.currentStep);
+
+        this.simulationState.currentStep++;
+        this.updateSimulationProgress();
+
+        if (this.simulationState.currentStep >= this.simulationState.totalSteps && !this.simulationState.isPlaying) {
+            this.showStatus('Simulation completed!', 'success');
+        }
+    }
+
+    resetSimulation() {
+        this.pauseSimulation();
+        this.simulationState.currentStep = 0;
+
+        // Clear all highlights
+        document.querySelectorAll('.edge').forEach(edge => {
+            edge.classList.remove('simulation-highlight', 'simulation-current');
+        });
+        document.querySelectorAll('.node').forEach(node => {
+            node.classList.remove('simulation-current');
+        });
+
+        this.updateSimulationProgress();
+        this.showStatus('Simulation reset', 'info');
+    }
+
+    animateTrailStep(step, stepIndex) {
+        // Clear previous current highlights
+        document.querySelectorAll('.simulation-current').forEach(el => {
+            el.classList.remove('simulation-current');
+        });
+
+        // Highlight current edge
+        const edgeElement = document.querySelector(`[data-edge-id="${step.edge_id}"]`);
+        if (edgeElement) {
+            edgeElement.classList.add('simulation-current');
+
+            // Add permanent highlight for completed steps
+            setTimeout(() => {
+                edgeElement.classList.add('simulation-highlight');
+            }, 500);
+        }
+
+        // Highlight current nodes
+        const sourceNode = document.querySelector(`[data-node-id="${step.source}"]`);
+        const targetNode = document.querySelector(`[data-node-id="${step.target}"]`);
+
+        if (sourceNode) sourceNode.classList.add('simulation-current');
+        if (targetNode) targetNode.classList.add('simulation-current');
+
+        // Update step description
+        this.updateSimulationStepInfo(step, stepIndex + 1);
+    }
+
+    updateSimulationProgress() {
+        const progress = (this.simulationState.currentStep / this.simulationState.totalSteps) * 100;
+        document.getElementById('simulationProgress').style.width = `${progress}%`;
+        document.getElementById('currentStep').textContent = this.simulationState.currentStep;
+        document.getElementById('totalSteps').textContent = this.simulationState.totalSteps;
+    }
+
+    updateSimulationStepInfo(step, stepNumber) {
+        const stepInfo = document.getElementById('simulationStepInfo');
+        if (stepInfo) {
+            const edgeType = step.directed ? '→' : '↔';
+            stepInfo.innerHTML = `
+                <div style="font-size: 1.1rem; font-weight: bold; margin-bottom: 10px;">
+                    Step ${stepNumber}: ${step.source} ${edgeType} ${step.target}
+                </div>
+                <div style="color: #6c757d; font-size: 0.9rem;">
+                    Edge ID: ${step.edge_id}
+                </div>
+            `;
+        }
+    }
+
+    initializeSimulation(trailResult) {
+        this.currentTrail = trailResult.trail;
+        this.simulationState.totalSteps = trailResult.trail.length;
+        this.simulationState.currentStep = 0;
+
+        // Show simulate button
+        document.getElementById('simulateTrail').style.display = 'inline-block';
+
+        this.updateSimulationProgress();
+        this.showStatus(`Ready to simulate ${this.simulationState.totalSteps} steps`, 'info');
+    }
+
     showStatus(message, type = 'info') {
         const statusDisplay = document.getElementById('statusDisplay');
         const timestamp = new Date().toLocaleTimeString();
-        
+
         let icon = '📝';
         if (type === 'error') icon = '❌';
         else if (type === 'success') icon = '✅';
         else if (type === 'warning') icon = '⚠️';
         else if (type === 'info') icon = 'ℹ️';
-        
+
         const statusMessage = `[${timestamp}] ${icon} ${message}\n`;
         statusDisplay.textContent = statusMessage + statusDisplay.textContent;
-        
+
         // Limit status display length
         const lines = statusDisplay.textContent.split('\n');
         if (lines.length > 50) {

@@ -27,24 +27,17 @@
                     <div class="control-panel">
                         <div class="panel-section">
                             <h3 class="section-title">
-                                <i class="fas fa-cogs"></i>
-                                Graph Settings
+                                <i class="fas fa-info-circle"></i>
+                                Mixed Graph Support
                             </h3>
-                            
                             <div class="form-group">
-                                <label class="label">Graph Type:</label>
-                                <div class="radio-group">
-                                    <label class="radio-label">
-                                        <input type="radio" name="graphType" value="undirected" checked>
-                                        <span class="radio-custom"></span>
-                                        Undirected
-                                    </label>
-                                    <label class="radio-label">
-                                        <input type="radio" name="graphType" value="directed">
-                                        <span class="radio-custom"></span>
-                                        Directed
-                                    </label>
-                                </div>
+                                <p style="color: #6c757d; font-size: 0.9rem; line-height: 1.5;">
+                                    This application supports <strong>mixed graphs</strong> with both directed and undirected edges.
+                                    You can create complex graph structures with different edge types in the same graph.
+                                </p>
+                                <p style="color: #6c757d; font-size: 0.9rem; line-height: 1.5; margin-top: 10px;">
+                                    💡 <em>Use the "Edge Type" selector below to choose the type for each new edge you create.</em>
+                                </p>
                             </div>
                         </div>
 
@@ -106,21 +99,67 @@
                                 <i class="fas fa-tools"></i>
                                 Actions
                             </h3>
-                            
+
                             <button id="findEulerTrail" class="btn btn-success">
                                 <i class="fas fa-route"></i>
                                 Find Euler Trail
                             </button>
-                            
+
+                            <button id="simulateTrail" class="btn btn-info" style="display: none;">
+                                <i class="fas fa-play"></i>
+                                Simulate Trail
+                            </button>
+
                             <button id="clearGraph" class="btn btn-danger">
                                 <i class="fas fa-trash"></i>
                                 Clear Graph
                             </button>
-                            
+
                             <button id="showHelp" class="btn btn-secondary">
                                 <i class="fas fa-question-circle"></i>
                                 Help
                             </button>
+                        </div>
+
+                        <!-- Simulation Controls (hidden by default) -->
+                        <div id="simulationControls" class="panel-section" style="display: none;">
+                            <h3 class="section-title">
+                                <i class="fas fa-film"></i>
+                                Trail Simulation
+                            </h3>
+
+                            <div class="simulation-progress" style="margin-bottom: 15px;">
+                                <div class="progress-bar">
+                                    <div id="simulationProgress" class="progress-fill" style="width: 0%;"></div>
+                                </div>
+                                <div class="progress-text">
+                                    <span id="currentStep">0</span> / <span id="totalSteps">0</span>
+                                </div>
+                            </div>
+
+                            <div class="simulation-controls">
+                                <button id="playPauseBtn" class="btn btn-sm btn-success">
+                                    <i class="fas fa-play"></i>
+                                    Play
+                                </button>
+                                <button id="stepBtn" class="btn btn-sm btn-secondary">
+                                    <i class="fas fa-step-forward"></i>
+                                    Step
+                                </button>
+                                <button id="resetBtn" class="btn btn-sm btn-warning">
+                                    <i class="fas fa-undo"></i>
+                                    Reset
+                                </button>
+                            </div>
+
+                            <div class="speed-control" style="margin-top: 15px;">
+                                <label class="label">Speed:</label>
+                                <div class="speed-buttons">
+                                    <button id="slowSpeed" class="btn btn-xs btn-outline-primary active">Slow</button>
+                                    <button id="mediumSpeed" class="btn btn-xs btn-outline-primary">Medium</button>
+                                    <button id="fastSpeed" class="btn btn-xs btn-outline-primary">Fast</button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="panel-section">
